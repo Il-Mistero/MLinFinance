@@ -1,1 +1,1 @@
-This encompasses all the projects that utilizes ML in Finance
+This encompasses all the projects I have worked on that utilizes ML in Finance
