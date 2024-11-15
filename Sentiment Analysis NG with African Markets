@@ -1,0 +1,107 @@
+!pip install feedparser requests beautifulsoup4 feedgen transformers torch
+
+import feedparser
+from transformers import pipeline
+import requests
+from bs4 import BeautifulSoup
+from feedgen.feed import FeedGenerator
+from urllib.parse import urljoin
+
+def analyze_content_in_chunks(pipe, content, chunk_size=512):
+
+    total_score = 0
+    num_chunks = 0
+    for i in range(0, len(content), chunk_size):
+        chunk = content[i:i + chunk_size]
+        sentiment = pipe(chunk)[0]
+        score = sentiment['score'] if sentiment['label'] == 'positive' else -sentiment['score']
+        total_score += score
+        num_chunks += 1
+    return total_score / num_chunks if num_chunks > 0 else 0
+
+ticker = "BUAFOODS"
+url = f"https://www.african-markets.com/en/stock-markets/ngse/listed-companies/company?code={ticker}"
+
+response = requests.get(url)
+if response.status_code != 200:
+    print("Failed to fetch the webpage.")
+    exit()
+
+soup = BeautifulSoup(response.content, "html.parser")
+news_items = soup.find_all("td", class_="edocman_document_list_title2")
+if not news_items:
+    print("No news items found.")
+    exit()
+
+fg = FeedGenerator()
+fg.title(f"{ticker} News")
+fg.link(href=url, rel="alternate")
+fg.description(f"Latest news and updates on {ticker} from African Markets.")
+fg.language("en")
+
+for news_item in news_items:
+    anchor = news_item.find("a")
+    if anchor:
+        title = anchor.text.strip()
+        link = urljoin("https://www.african-markets.com", anchor['href'])
+        
+        if ticker.lower() in title.lower() and ticker.lower() in link.lower():
+            entry = fg.add_entry()
+            entry.title(title)
+            entry.link(href=link)
+            entry.description(title)
+
+rss_feed_path = f"{ticker}_News_RSS.xml"
+rss_feed = fg.rss_str(pretty=True)
+with open(rss_feed_path, "wb") as f:
+    f.write(rss_feed)
+
+print(f"RSS Feed generated: {rss_feed_path}")
+
+pipe = pipeline(task="text-classification", model="ProsusAI/finbert")
+
+rss_feed = feedparser.parse(rss_feed_path)
+
+total_score = 0
+number_of_articles = 0
+
+print("\n--- Sentiment Analysis on Articles ---\n")
+for entry in rss_feed.entries:
+    print(f"Title: {entry.title}")
+    print(f"Link: {entry.link}")
+
+    valid_url = urljoin("https://www.african-markets.com", entry.link)
+    
+    try:
+        article_response = requests.get(valid_url)
+        if article_response.status_code == 200:
+            article_soup = BeautifulSoup(article_response.content, "html.parser")
+            article_content = article_soup.get_text(strip=True)
+            article_content = " ".join(article_content.split())
+            
+            if article_content:
+                final_score = analyze_content_in_chunks(pipe, article_content[:4000])
+                overall_sentiment = (
+                    "positive" if final_score >= 0.15 else "negative" if final_score <= -0.15 else "neutral"
+                )
+                print(f"Sentiment: {overall_sentiment}, Score: {final_score}")
+                
+                total_score += final_score
+                number_of_articles += 1
+            else:
+                print("Article content could not be extracted.")
+        else:
+            print("Failed to fetch the article.")
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching the article: {e}")
+
+    print("-" * 40)
+
+if number_of_articles > 0:
+    avg_score = total_score / number_of_articles
+    overall_sentiment = (
+        "Positive" if avg_score >= 0.15 else "Negative" if avg_score <= -0.15 else "Neutral"
+    )
+    print(f"\nOverall Sentiment: {overall_sentiment} ({avg_score})")
+else:
+    print("No articles found for sentiment analysis.")
