@@ -102,6 +102,6 @@ if number_of_articles > 0:
     overall_sentiment = (
         "Positive" if avg_score >= 0.15 else "Negative" if avg_score <= -0.15 else "Neutral"
     )
-    print(f"\nOverall Sentiment: {overall_sentiment} ({avg_score})")
+    print(f"\nOverall Sentiment: {overall_sentiment} {avg_score}")
 else:
     print("No articles found for sentiment analysis.")
